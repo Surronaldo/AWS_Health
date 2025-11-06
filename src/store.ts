@@ -3,7 +3,6 @@ import {
   type Appointment,
   AppointmentStatus,
   type MedicalRecord,
-  type Role,
   type User,
   roles,
 } from "./types";
