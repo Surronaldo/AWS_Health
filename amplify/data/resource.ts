@@ -12,17 +12,17 @@ const schema = a.schema({
       date: a.string().required(),   // YYYY-MM-DD
       time: a.string().required(),   // HH:mm
       reason: a.string(),
-      // ❌ enums can't use .default(...) in Gen 2 today; set default in client code instead
+      // enums: no server-side default; set it in client when creating items
       status: a.enum(AppointmentStatus),
-      createdAt: a.datetime().default('now'),
+      // remove invalid default('now'); client can set ISO string if needed
+      createdAt: a.datetime(),
     })
     .authorization((allow) => [
-      // Patient can CRUD only *their* items (owner stored in patientId)
+      // Patient can CRUD only their own items (owner is defined in patientId)
       allow.ownerDefinedIn('patientId').to(['create', 'read', 'update', 'delete']),
-      // Doctors can read/update any appointment (tweak as needed)
+      // Doctors can read/update any appointment
       allow.groups(['Doctors']).to(['read', 'update']),
     ])
-    // GSIs to list by patient/doctor and sort by date+time
     .secondaryIndexes((index: any) => [
       index('patientId').sortKeys(['date', 'time']).queryField('listAppointmentsByPatient'),
       index('doctorId').sortKeys(['date', 'time']).queryField('listAppointmentsByDoctor'),
@@ -37,13 +37,14 @@ const schema = a.schema({
       title: a.string().required(),
       notes: a.string().required(),
       prescription: a.string(),
-      date: a.string().required(),  // copy from appointment
-      createdAt: a.datetime().default('now'),
+      date: a.string().required(),    // copy from appointment
+      // remove invalid default('now'); client can set ISO string if needed
+      createdAt: a.datetime(),
     })
     .authorization((allow) => [
       // Doctors create/read records
       allow.groups(['Doctors']).to(['create', 'read']),
-      // Patient can read their own records
+      // Patients can read their own records
       allow.ownerDefinedIn('patientId').to(['read']),
     ])
     .secondaryIndexes((index: any) => [
