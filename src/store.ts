@@ -1,189 +1,188 @@
-// src/store.ts
-import {
-  type Appointment,
-  AppointmentStatus,
-  type MedicalRecord,
-  type User,
-  roles,
-} from "./types";
+// src/store.ts (cloud-backed via Amplify Data)
+import { client } from './amplifyClient';
+import { roles, AppointmentStatus, type User, type Appointment, type MedicalRecord } from './types';
 
-const KEY = {
-  users: "hms.users",
-  appointments: "hms.appts",
-  records: "hms.records",
-  session: "hms.session",
-};
-
-function uid(prefix = ""): string {
-  return `${prefix}${Math.random().toString(36).slice(2, 10)}${Date.now()
-    .toString(36)
-    .slice(-6)}`;
+// In cloud mode, we derive identities from Cognito.
+// Keep a minimal "session" cache for the UI, but real auth is Cognito (Amplify <Auth> UI would be ideal).
+export function currentUser(): User | null {
+  // For demo: read from local cache you populated at login screen
+  const raw = localStorage.getItem('hms.session');
+  return raw ? JSON.parse(raw) as User : null;
+}
+export function authLogout() {
+  localStorage.removeItem('hms.session');
 }
 
-function load<T>(k: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(k);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
+// In production you should create users via Cognito sign-up and store display names in UserProfile.
+// For demo continuity, fake-login keeps the UI working while backend handles data.
+export function authLogin(username: string, password: string): User | null {
+  // Stub login (replace with Amplify Auth UI or Auth.signIn)
+  if (username === 'alice' && password === 'patient123') {
+    const u: User = { id: 'DEMO_PATIENT_SUB', username, password, name: 'Alice Johnson', role: roles.Patient };
+    localStorage.setItem('hms.session', JSON.stringify(u));
+    return u;
   }
-}
-
-function save<T>(k: string, v: T) {
-  localStorage.setItem(k, JSON.stringify(v));
+  if (username === 'drbob' && password === 'doctor123') {
+    const u: User = { id: 'DEMO_DOCTOR_SUB', username, password, name: 'Dr. Bob Smith', role: roles.Doctor };
+    localStorage.setItem('hms.session', JSON.stringify(u));
+    return u;
+  }
+  return null;
 }
 
 export function seedIfEmpty() {
-  const users = load<User[]>(KEY.users, []);
-  if (users.length > 0) return;
-
-  const seeded: User[] = [
-    {
-      id: uid("u_"),
-      username: "alice",
-      password: "patient123",
-      name: "Alice Johnson",
-      role: roles.Patient,
-    },
-    {
-      id: uid("u_"),
-      username: "drbob",
-      password: "doctor123",
-      name: "Dr. Bob Smith",
-      role: roles.Doctor,
-    },
-    {
-      id: uid("u_"),
-      username: "drlee",
-      password: "doctor123",
-      name: "Dr. Emily Lee",
-      role: roles.Doctor,
-    },
-  ];
-  save(KEY.users, seeded);
-  save<Appointment[]>(KEY.appointments, []);
-  save<MedicalRecord[]>(KEY.records, []);
-}
-
-export function listUsers(): User[] {
-  return load<User[]>(KEY.users, []);
+  // No-op in cloud mode (data is in DynamoDB via Amplify Data)
 }
 
 export function listDoctors(): User[] {
-  return listUsers().filter((u) => u.role === roles.Doctor);
+  // In a real app, query Cognito for users in Doctors group or keep profiles in UserProfile.
+  return [
+    { id: 'DEMO_DOCTOR_SUB', username: 'drbob', password: 'doctor123', name: 'Dr. Bob Smith', role: roles.Doctor },
+  ];
 }
 
 export function listPatients(): User[] {
-  return listUsers().filter((u) => u.role === roles.Patient);
+  return [
+    { id: 'DEMO_PATIENT_SUB', username: 'alice', password: 'patient123', name: 'Alice Johnson', role: roles.Patient },
+  ];
 }
 
-export function authLogin(username: string, password: string): User | null {
-  const user = listUsers().find(
-    (u) => u.username.toLowerCase() === username.toLowerCase() && u.password === password
-  );
-  if (!user) return null;
-  save(KEY.session, user);
-  return user;
-}
+// --- Appointments ---
 
-export function authLogout() {
-  localStorage.removeItem(KEY.session);
-}
-
-export function currentUser(): User | null {
-  return load<User | null>(KEY.session, null);
-}
-
-export function createAppointment(input: {
+export async function createAppointment(input: {
   patientId: string;
   doctorId: string;
   date: string;
   time: string;
   reason?: string;
-}): Appointment {
-  const appts = load<Appointment[]>(KEY.appointments, []);
-  const appt: Appointment = {
-    id: uid("a_"),
+}): Promise<Appointment> {
+  const res = await client.models.Appointment.create({
     patientId: input.patientId,
     doctorId: input.doctorId,
     date: input.date,
     time: input.time,
-    reason: input.reason?.trim() || undefined,
+    reason: input.reason,
+    status: 'SCHEDULED',
+  });
+  const a = res.data!;
+  return {
+    id: a.id,
+    patientId: a.patientId,
+    doctorId: a.doctorId,
+    date: a.date,
+    time: a.time,
+    reason: a.reason ?? undefined,
     status: AppointmentStatus.Scheduled,
-    createdAt: new Date().toISOString(),
+    createdAt: a.createdAt!,
   };
-  appts.push(appt);
-  save(KEY.appointments, appts);
-  return appt;
 }
 
-export function listAppointmentsForUser(user: User): Appointment[] {
-  const appts = load<Appointment[]>(KEY.appointments, []);
+export async function listAppointmentsForUser(user: User): Promise<Appointment[]> {
   if (user.role === roles.Patient) {
-    return appts
-      .filter((a) => a.patientId === user.id)
-      .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+    const res = await client.models.Appointment.list({
+      filter: { patientId: { eq: user.id } },
+      limit: 100,
+    });
+    return (res.data ?? []).map(toAppt).sort(sortAppt);
   }
   if (user.role === roles.Doctor) {
-    return appts
-      .filter((a) => a.doctorId === user.id)
-      .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+    const res = await client.models.Appointment.list({
+      filter: { doctorId: { eq: user.id } },
+      limit: 100,
+    });
+    return (res.data ?? []).map(toAppt).sort(sortAppt);
   }
   return [];
 }
 
-export function cancelAppointment(id: string) {
-  const appts = load<Appointment[]>(KEY.appointments, []);
-  const idx = appts.findIndex((a) => a.id === id);
-  if (idx >= 0) {
-    appts[idx] = { ...appts[idx], status: AppointmentStatus.Cancelled };
-    save(KEY.appointments, appts);
+export async function cancelAppointment(id: string): Promise<void> {
+  const got = await client.models.Appointment.get({ id });
+  if (got.data) {
+    await client.models.Appointment.update({ ...got.data, status: 'CANCELLED' });
   }
 }
 
-export function completeAppointment(id: string) {
-  const appts = load<Appointment[]>(KEY.appointments, []);
-  const idx = appts.findIndex((a) => a.id === id);
-  if (idx >= 0) {
-    appts[idx] = { ...appts[idx], status: AppointmentStatus.Completed };
-    save(KEY.appointments, appts);
+export async function completeAppointment(id: string): Promise<void> {
+  const got = await client.models.Appointment.get({ id });
+  if (got.data) {
+    await client.models.Appointment.update({ ...got.data, status: 'COMPLETED' });
   }
 }
 
-export function createRecord(input: {
+// --- Records ---
+
+export async function createRecord(input: {
   appointment: Appointment;
   title: string;
   notes: string;
   prescription?: string;
   doctor: User;
-}): MedicalRecord {
-  const users = listUsers();
-  const patient = users.find((u) => u.id === input.appointment.patientId)!;
-  const doctor = users.find((u) => u.id === input.appointment.doctorId)!;
-
-  const rec: MedicalRecord = {
-    id: uid("r_"),
+}): Promise<MedicalRecord> {
+  const rec = await client.models.MedicalRecord.create({
     appointmentId: input.appointment.id,
-    patientId: patient.id,
-    patientName: patient.name,
-    doctorId: doctor.id,
-    doctorName: doctor.name,
-    title: input.title.trim(),
-    notes: input.notes.trim(),
-    prescription: input.prescription?.trim() || undefined,
+    patientId: input.appointment.patientId,
+    doctorId: input.appointment.doctorId,
+    title: input.title,
+    notes: input.notes,
+    prescription: input.prescription,
     date: input.appointment.date,
-    createdAt: new Date().toISOString(),
+  });
+  const r = rec.data!;
+  return {
+    id: r.id,
+    appointmentId: r.appointmentId,
+    patientId: r.patientId,
+    patientName: listPatients().find(p => p.id === r.patientId)?.name ?? 'Patient',
+    doctorId: r.doctorId,
+    doctorName: listDoctors().find(d => d.id === r.doctorId)?.name ?? 'Doctor',
+    title: r.title,
+    notes: r.notes,
+    prescription: r.prescription ?? undefined,
+    date: r.date,
+    createdAt: r.createdAt!,
   };
-
-  const all = load<MedicalRecord[]>(KEY.records, []);
-  all.push(rec);
-  save(KEY.records, all);
-  return rec;
 }
 
-export function listRecordsForPatient(patientId: string): MedicalRecord[] {
-  const all = load<MedicalRecord[]>(KEY.records, []);
-  return all
-    .filter((r) => r.patientId === patientId)
+export async function listRecordsForPatient(patientId: string): Promise<MedicalRecord[]> {
+  const res = await client.models.MedicalRecord.list({
+    filter: { patientId: { eq: patientId } },
+    limit: 200,
+  });
+  return (res.data ?? [])
+    .map((r) => ({
+      id: r.id,
+      appointmentId: r.appointmentId,
+      patientId: r.patientId,
+      patientName: listPatients().find(p => p.id === r.patientId)?.name ?? 'Patient',
+      doctorId: r.doctorId,
+      doctorName: listDoctors().find(d => d.id === r.doctorId)?.name ?? 'Doctor',
+      title: r.title,
+      notes: r.notes,
+      prescription: r.prescription ?? undefined,
+      date: r.date,
+      createdAt: r.createdAt!,
+    }))
     .sort((a, b) => (a.date + a.createdAt).localeCompare(b.date + b.createdAt));
+}
+
+// helpers
+function toAppt(a: any): Appointment {
+  return {
+    id: a.id,
+    patientId: a.patientId,
+    doctorId: a.doctorId,
+    date: a.date,
+    time: a.time,
+    reason: a.reason ?? undefined,
+    status:
+      a.status === 'COMPLETED'
+        ? AppointmentStatus.Completed
+        : a.status === 'CANCELLED'
+        ? AppointmentStatus.Cancelled
+        : AppointmentStatus.Scheduled,
+    createdAt: a.createdAt!,
+  };
+}
+function sortAppt(a: Appointment, b: Appointment) {
+  return (a.date + a.time).localeCompare(b.date + b.time);
 }
