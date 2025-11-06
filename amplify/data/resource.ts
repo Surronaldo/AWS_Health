@@ -1,43 +1,47 @@
 // amplify/data/resource.ts
 import { a, defineData, type ClientSchema } from '@aws-amplify/backend';
 
-// Simple enum for status
 const AppointmentStatus = ['SCHEDULED', 'COMPLETED', 'CANCELLED'] as const;
-type Status = (typeof AppointmentStatus)[number];
 
 const schema = a.schema({
 
-  // Optional user profile (handy for showing names)
   UserProfile: a
     .model({
-      id: a.id(),                 // Cognito sub as id
-      name: a.string().required(),// display name
+      id: a.id(),                  
+      name: a.string().required(), 
     })
     .identifier(['id'])
     .authorization((allow) => [
-      allow.owner(),              // users can CRUD their own profile
+      allow.owner(),               
       allow.group('Doctors').to(['read']),
     ]),
 
   Appointment: a
     .model({
-      patientId: a.id().required(), // Cognito sub of patient
-      doctorId: a.id().required(),  // Cognito sub of doctor
-      date: a.string().required(),  // YYYY-MM-DD
-      time: a.string().required(),  // HH:mm
+      patientId: a.id().required(),
+      doctorId: a.id().required(),
+      date: a.string().required(),   // YYYY-MM-DD
+      time: a.string().required(),   // HH:mm
       reason: a.string(),
       status: a.enum(AppointmentStatus).default('SCHEDULED'),
       createdAt: a.datetime().default('now'),
     })
     .authorization((allow) => [
-      // Patient can CRUD their own appointments
-      allow.owner().to(['create','read','update','delete']).identityClaim('sub').references('patientId'),
-      // Doctors group can read/update all (simple baseline demo)
+      allow.owner()
+        .to(['create','read','update','delete'])
+        .identityClaim('sub')
+        .references('patientId'),
+
       allow.group('Doctors').to(['read','update']),
     ])
-    .indexes((index) => [
-      index('byPatient').partitionKeys(['patientId']).sortKeys(['date','time']),
-      index('byDoctor').partitionKeys(['doctorId']).sortKeys(['date','time']),
+    .secondaryIndexes((index: any) => [
+      index('patientId')
+        .sortKeys(['date','time'])
+        .queryField('listAppointmentsByPatient'),
+
+      index('doctorId')
+        .sortKeys(['date','time'])
+        .queryField('listAppointmentsByDoctor'),
     ]),
 
   MedicalRecord: a
@@ -48,18 +52,23 @@ const schema = a.schema({
       title: a.string().required(),
       notes: a.string().required(),
       prescription: a.string(),
-      date: a.string().required(),    // reuse appt date
+      date: a.string().required(),
       createdAt: a.datetime().default('now'),
     })
     .authorization((allow) => [
-      // Doctors create/read records
       allow.group('Doctors').to(['create','read']),
-      // Patients can read records that belong to them
-      allow.owner().to(['read']).identityClaim('sub').references('patientId'),
+      allow.owner()
+        .to(['read'])
+        .identityClaim('sub')
+        .references('patientId'),
     ])
-    .indexes((index) => [
-      index('byPatient').partitionKeys(['patientId']).sortKeys(['date','createdAt']),
-      index('byAppointment').partitionKeys(['appointmentId']),
+    .secondaryIndexes((index: any) => [
+      index('patientId')
+        .sortKeys(['date','createdAt'])
+        .queryField('listRecordsByPatient'),
+
+      index('appointmentId')
+        .queryField('listRecordsByAppointment'),
     ]),
 });
 
