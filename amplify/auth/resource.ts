@@ -2,12 +2,10 @@
 import { defineAuth } from '@aws-amplify/backend';
 
 export const auth = defineAuth({
-  loginWith: {
-    email: true, // email-based sign-in
-  },
-  userPoolGroups: {
-    Doctors: {},  // assign doctors here
-    Patients: {}, // assign patients here
-  },
+  // Sign in with email (add others if you want)
+  loginWith: { email: true },
+
+  // ✅ In Gen 2, define user pool groups with "groups"
+  groups: ['Doctors', 'Patients'],
 });
 
