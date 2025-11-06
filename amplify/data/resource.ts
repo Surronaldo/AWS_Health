@@ -1,57 +1,70 @@
-import { type ClientSchema, a, defineData } from "@aws-amplify/backend";
+// amplify/data/resource.ts
+import { a, defineData, type ClientSchema } from '@aws-amplify/backend';
 
-/*== STEP 1 ===============================================================
-The section below creates a Todo database table with a "content" field. Try
-adding a new "isDone" field as a boolean. The authorization rule below
-specifies that any user authenticated via an API key can "create", "read",
-"update", and "delete" any "Todo" records.
-=========================================================================*/
+// Simple enum for status
+const AppointmentStatus = ['SCHEDULED', 'COMPLETED', 'CANCELLED'] as const;
+type Status = (typeof AppointmentStatus)[number];
+
 const schema = a.schema({
-  Todo: a
+
+  // Optional user profile (handy for showing names)
+  UserProfile: a
     .model({
-      content: a.string(),
+      id: a.id(),                 // Cognito sub as id
+      name: a.string().required(),// display name
     })
-    .authorization((allow) => [allow.publicApiKey()]),
+    .identifier(['id'])
+    .authorization((allow) => [
+      allow.owner(),              // users can CRUD their own profile
+      allow.group('Doctors').to(['read']),
+    ]),
+
+  Appointment: a
+    .model({
+      patientId: a.id().required(), // Cognito sub of patient
+      doctorId: a.id().required(),  // Cognito sub of doctor
+      date: a.string().required(),  // YYYY-MM-DD
+      time: a.string().required(),  // HH:mm
+      reason: a.string(),
+      status: a.enum(AppointmentStatus).default('SCHEDULED'),
+      createdAt: a.datetime().default('now'),
+    })
+    .authorization((allow) => [
+      // Patient can CRUD their own appointments
+      allow.owner().to(['create','read','update','delete']).identityClaim('sub').references('patientId'),
+      // Doctors group can read/update all (simple baseline demo)
+      allow.group('Doctors').to(['read','update']),
+    ])
+    .indexes((index) => [
+      index('byPatient').partitionKeys(['patientId']).sortKeys(['date','time']),
+      index('byDoctor').partitionKeys(['doctorId']).sortKeys(['date','time']),
+    ]),
+
+  MedicalRecord: a
+    .model({
+      appointmentId: a.id().required(),
+      patientId: a.id().required(),
+      doctorId: a.id().required(),
+      title: a.string().required(),
+      notes: a.string().required(),
+      prescription: a.string(),
+      date: a.string().required(),    // reuse appt date
+      createdAt: a.datetime().default('now'),
+    })
+    .authorization((allow) => [
+      // Doctors create/read records
+      allow.group('Doctors').to(['create','read']),
+      // Patients can read records that belong to them
+      allow.owner().to(['read']).identityClaim('sub').references('patientId'),
+    ])
+    .indexes((index) => [
+      index('byPatient').partitionKeys(['patientId']).sortKeys(['date','createdAt']),
+      index('byAppointment').partitionKeys(['appointmentId']),
+    ]),
 });
 
 export type Schema = ClientSchema<typeof schema>;
 
 export const data = defineData({
   schema,
-  authorizationModes: {
-    defaultAuthorizationMode: "apiKey",
-    // API Key is used for a.allow.public() rules
-    apiKeyAuthorizationMode: {
-      expiresInDays: 30,
-    },
-  },
 });
-
-/*== STEP 2 ===============================================================
-Go to your frontend source code. From your client-side code, generate a
-Data client to make CRUDL requests to your table. (THIS SNIPPET WILL ONLY
-WORK IN THE FRONTEND CODE FILE.)
-
-Using JavaScript or Next.js React Server Components, Middleware, Server 
-Actions or Pages Router? Review how to generate Data clients for those use
-cases: https://docs.amplify.aws/gen2/build-a-backend/data/connect-to-API/
-=========================================================================*/
-
-/*
-"use client"
-import { generateClient } from "aws-amplify/data";
-import type { Schema } from "@/amplify/data/resource";
-
-const client = generateClient<Schema>() // use this Data client for CRUDL requests
-*/
-
-/*== STEP 3 ===============================================================
-Fetch records from the database and use them in your frontend component.
-(THIS SNIPPET WILL ONLY WORK IN THE FRONTEND CODE FILE.)
-=========================================================================*/
-
-/* For example, in a React component, you can use this snippet in your
-  function's RETURN statement */
-// const { data: todos } = await client.models.Todo.list()
-
-// return <ul>{todos.map(todo => <li key={todo.id}>{todo.content}</li>)}</ul>
