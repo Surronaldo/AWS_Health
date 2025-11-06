@@ -2,7 +2,6 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 import {
-  type Role,
   type User,
   type Appointment,
   type MedicalRecord,
@@ -48,11 +47,7 @@ function Header({
   );
 }
 
-function Login({
-  onLoggedIn,
-}: {
-  onLoggedIn: (u: User) => void;
-}) {
+function Login({ onLoggedIn }: { onLoggedIn: (u: User) => void }) {
   const [username, setUsername] = useState("alice");
   const [password, setPassword] = useState("patient123");
   const [error, setError] = useState<string | null>(null);
@@ -71,9 +66,7 @@ function Login({
   return (
     <div className="card login-card">
       <h2>Sign in</h2>
-      <p className="muted">
-        Seed users exist so you can test quickly:
-      </p>
+      <p className="muted">Seed users exist so you can test quickly:</p>
       <ul className="muted small">
         <li>
           Patient → <code>alice</code> / <code>patient123</code>
@@ -408,7 +401,6 @@ function DoctorDashboard({ user }: { user: User }) {
 }
 
 export default function App() {
-  // initialize demo data on first load
   useEffect(() => {
     seedIfEmpty();
   }, []);
@@ -421,13 +413,9 @@ export default function App() {
       <main className="container">
         {!user && <Login onLoggedIn={setUser} />}
 
-        {user && user.role === roles.Patient && (
-          <PatientDashboard user={user} />
-        )}
+        {user && user.role === roles.Patient && <PatientDashboard user={user} />}
 
-        {user && user.role === roles.Doctor && (
-          <DoctorDashboard user={user} />
-        )}
+        {user && user.role === roles.Doctor && <DoctorDashboard user={user} />}
       </main>
       <footer className="app-footer">
         <span className="muted small">
@@ -437,4 +425,3 @@ export default function App() {
     </div>
   );
 }
-
