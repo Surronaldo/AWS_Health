@@ -1,10 +1,11 @@
-// src/amplifyClient.ts
-import { Amplify } from 'aws-amplify';
-import outputs from '../amplify_outputs.json';
-import { generateClient } from 'aws-amplify/data';
-import type { Schema } from '../amplify/data/resource';
+// amplify/backend.ts
+import { defineBackend } from '@aws-amplify/backend';
+import { auth } from './auth/resource';
+import { data } from './data/resource';
 
-Amplify.configure(outputs);
+export const backend = defineBackend({
+  auth,
+  data,
+});
 
-export const client = generateClient<Schema>();
 
