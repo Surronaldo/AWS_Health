@@ -112,28 +112,42 @@ function PatientDashboard({ user }: { user: User }) {
   const [time, setTime] = useState("");
   const [note, setNote] = useState("");
 
-  const [appointments, setAppointments] = useState<Appointment[]>(
-    listAppointmentsForUser(user)
-  );
-  const records = listRecordsForPatient(user.id);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [records, setRecords] = useState<MedicalRecord[]>([]);
 
-  function submitAppointment(e: React.FormEvent) {
+  // load appointments & records
+  useEffect(() => {
+    (async () => {
+      const [a, r] = await Promise.all([
+        listAppointmentsForUser(user),
+        listRecordsForPatient(user.id),
+      ]);
+      setAppointments(a);
+      setRecords(r);
+    })();
+  }, [user]);
+
+  async function submitAppointment(e: React.FormEvent) {
     e.preventDefault();
     if (!doctorId || !date || !time) return;
-    createAppointment({
+    await createAppointment({
       patientId: user.id,
       doctorId,
       date,
       time,
       reason: note,
     });
-    setAppointments(listAppointmentsForUser(user));
     setNote("");
+    setDate("");
+    setTime("");
+    const a = await listAppointmentsForUser(user);
+    setAppointments(a);
   }
 
-  function onCancel(apptId: string) {
-    cancelAppointment(apptId);
-    setAppointments(listAppointmentsForUser(user));
+  async function onCancel(apptId: string) {
+    await cancelAppointment(apptId);
+    const a = await listAppointmentsForUser(user);
+    setAppointments(a);
   }
 
   return (
@@ -207,10 +221,7 @@ function PatientDashboard({ user }: { user: User }) {
               </div>
               <div className="row gap-8">
                 {a.status === AppointmentStatus.Scheduled && (
-                  <button
-                    className="btn outline"
-                    onClick={() => onCancel(a.id)}
-                  >
+                  <button className="btn outline" onClick={() => onCancel(a.id)}>
                     Cancel
                   </button>
                 )}
@@ -256,11 +267,9 @@ function RecordsList({ records }: { records: MedicalRecord[] }) {
 }
 
 function DoctorDashboard({ user }: { user: User }) {
-  const [appointments, setAppointments] = useState<Appointment[]>(
-    listAppointmentsForUser(user)
-  );
-
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [selectedApptId, setSelectedApptId] = useState<string>("");
+
   const selectedAppt = useMemo(
     () => appointments.find((a) => a.id === selectedApptId) || null,
     [appointments, selectedApptId]
@@ -270,26 +279,44 @@ function DoctorDashboard({ user }: { user: User }) {
   const [notes, setNotes] = useState("");
   const [prescription, setPrescription] = useState("");
 
-  function refresh() {
-    setAppointments(listAppointmentsForUser(user));
+  useEffect(() => {
+    (async () => {
+      const a = await listAppointmentsForUser(user);
+      setAppointments(a);
+    })();
+  }, [user]);
+
+  async function refresh() {
+    const a = await listAppointmentsForUser(user);
+    setAppointments(a);
   }
 
-  function markCompleteAndCreateRecord(e: React.FormEvent) {
+  async function onCancel(id: string, e?: React.MouseEvent) {
+    if (e) e.stopPropagation();
+    await cancelAppointment(id);
+    await refresh();
+  }
+
+  async function markCompleteAndCreateRecord(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedAppt) return;
-    const rec = createRecord({
+
+    const rec = await createRecord({
       appointment: selectedAppt,
       title,
       notes,
       prescription,
       doctor: user,
     });
-    completeAppointment(selectedAppt.id);
+
+    await completeAppointment(selectedAppt.id);
+
     setTitle("");
     setNotes("");
     setPrescription("");
     setSelectedApptId("");
-    refresh();
+
+    await refresh();
     alert(`Record created for ${rec.patientName}`);
   }
 
@@ -322,11 +349,7 @@ function DoctorDashboard({ user }: { user: User }) {
                 {a.status === AppointmentStatus.Scheduled && (
                   <button
                     className="btn outline"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      cancelAppointment(a.id);
-                      refresh();
-                    }}
+                    onClick={(e) => onCancel(a.id, e)}
                   >
                     Cancel
                   </button>
@@ -409,7 +432,13 @@ export default function App() {
 
   return (
     <div className="app-root">
-      <Header user={user} onLogout={() => { authLogout(); setUser(null); }} />
+      <Header
+        user={user}
+        onLogout={() => {
+          authLogout();
+          setUser(null);
+        }}
+      />
       <main className="container">
         {!user && <Login onLoggedIn={setUser} />}
 
@@ -419,7 +448,7 @@ export default function App() {
       </main>
       <footer className="app-footer">
         <span className="muted small">
-          Demo app — data persists in your browser&apos;s localStorage.
+          Demo app — data persists in DynamoDB via Amplify Data.
         </span>
       </footer>
     </div>
